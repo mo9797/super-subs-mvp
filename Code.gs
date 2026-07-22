@@ -1,6 +1,11 @@
 const SHEET_ID = '1-tema9OUKu0j2wner8aGvy3mUX1qhswhCRNW4jHfgqI';
 const TX_SHEET = 'Transactions';
 const MEMBERS_SHEET = 'Members';
+const SESSIONS_SHEET = 'Sessions';
+const TX_HEADERS = ['ID','Type','Quantity','Unit Price','Total','Financial Party','Note','Occurred At','Created By','Session ID'];
+const SESSION_HEADERS = ['Session ID','Name','Started At','Closed At','Status','Created By'];
+const DEFAULT_SESSION_NAME = 'جلسة اليوم';
+const VALID_SESSION_STATUSES = ['active','closed'];
 const VALID_PURCHASE_PARTIES = ['حمدي','علي'];
 const VALID_SALE_PARTIES = ['محفظة حمدي','محفظة علي'];
 
@@ -9,7 +14,7 @@ function doGet(e) {
   try {
     const email = getUserEmail_();
     assertMember_(email);
-    const payload = {ok:true, transactions: readTransactions_(), members: readMembers_(), user: email};
+    const payload = {ok:true, transactions: readTransactions_(), members: readMembers_(), sessions: readSessions_(), user: email};
     return json_(payload, callback);
   } catch (err) {
     return json_({ok:false, error: safeError_(err)}, callback);
@@ -23,9 +28,10 @@ function doPost(e) {
     assertMember_(email);
     if (body.action === 'add') addTransaction_(body, email);
     else if (body.action === 'update') updateTransaction_(body, email);
+    else if (body.action === 'session') createSession_(body.session || body, email);
     else if (body.action === 'delete') deleteTransaction_(body.id, email);
     else if (body.action === 'member') addMember_(body.email, email);
-    else if (body.action === 'list') return json_({ok:true, transactions:readTransactions_(), members:readMembers_(), user:email});
+    else if (body.action === 'list') return json_({ok:true, transactions:readTransactions_(), members:readMembers_(), sessions:readSessions_(), user:email});
     else throw new Error('Unsupported action');
     return json_({ok:true});
   } catch (err) {
@@ -60,8 +66,69 @@ function readTransactions_() {
   const values = sheet.getDataRange().getDisplayValues();
   return values.slice(1).filter(function(r){ return r[0]; }).map(function(r){
     const occurred = r[7] || '';
-    return {id:r[0], type:r[1], qty:r[2] ? Number(r[2]) : null, price:r[3] ? Number(r[3]) : 0, total:r[4] ? Number(r[4]) : 0, party:r[5] || '', note:r[6] || '', date:occurred, day: transactionDay_(occurred), by:r[8] || ''};
+    const day = transactionDay_(occurred);
+    return {id:r[0], type:r[1], qty:r[2] ? Number(r[2]) : null, price:r[3] ? Number(r[3]) : 0, total:r[4] ? Number(r[4]) : 0, party:r[5] || '', note:r[6] || '', date:occurred, day:day, by:r[8] || '', sessionId:r[9] || ('daily-' + day)};
   });
+}
+
+function readSessions_() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  let sheet = ss.getSheetByName(SESSIONS_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(SESSIONS_SHEET);
+    sheet.getRange(1, 1, 1, SESSION_HEADERS.length).setValues([SESSION_HEADERS]);
+  }
+  const values = sheet.getDataRange().getDisplayValues();
+  const rows = values.slice(1).filter(function(r){ return r[0]; }).map(function(r){
+    return {id:r[0], name:r[1] || DEFAULT_SESSION_NAME, startedAt:r[2] || '', closedAt:r[3] || '', status:r[4] || 'active', createdBy:r[5] || ''};
+  });
+  const known = {};
+  rows.forEach(function(row){ known[row.id] = true; });
+  const txSheet = ss.getSheetByName(TX_SHEET);
+  if (txSheet && txSheet.getLastRow() > 1) {
+    txSheet.getRange(2, 1, txSheet.getLastRow() - 1, Math.min(10, txSheet.getLastColumn())).getDisplayValues().forEach(function(r){
+      const day = transactionDay_(r[7]);
+      const id = r[9] || (day ? 'daily-' + day : '');
+      if (id && !known[id]) {
+        const name = r[9] ? 'جلسة غير مسماة' : 'غير مصنفة · ' + day;
+        sheet.appendRow([id, name, r[7] || new Date(), '', 'active', '']);
+        rows.push({id:id, name:name, startedAt:r[7] || '', closedAt:'', status:'active', createdBy:''});
+        known[id] = true;
+      }
+    });
+  }
+  if (!rows.length) {
+    const id = 'daily-' + transactionDay_(new Date());
+    sheet.appendRow([id, DEFAULT_SESSION_NAME, new Date(), '', 'active', '']);
+    rows.push({id:id, name:DEFAULT_SESSION_NAME, startedAt:new Date().toISOString(), closedAt:'', status:'active', createdBy:''});
+  }
+  return rows;
+}
+
+function assertSession_(sessionId) {
+  const id = clean_(sessionId, 100);
+  if (!id) throw new Error('Session ID is required');
+  const session = readSessions_().filter(function(s){ return s.id === id; })[0];
+  if (!session) throw new Error('Session not found');
+  if (String(session.status).toLowerCase() === 'closed') throw new Error('Session is closed');
+  return id;
+}
+
+function createSession_(body, email) {
+  const name = clean_(body.name, 80);
+  if (!name) throw new Error('Session name is required');
+  const id = clean_(body.id, 100) || Utilities.getUuid();
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const ss = SpreadsheetApp.openById(SHEET_ID);
+    let sheet = ss.getSheetByName(SESSIONS_SHEET);
+    if (!sheet) sheet = ss.insertSheet(SESSIONS_SHEET);
+    if (sheet.getLastRow() < 1 || sheet.getRange(1, 1, 1, SESSION_HEADERS.length).getDisplayValues()[0].join('|') !== SESSION_HEADERS.join('|')) sheet.getRange(1, 1, 1, SESSION_HEADERS.length).setValues([SESSION_HEADERS]);
+    const existing = sheet.getLastRow() > 1 ? sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getDisplayValues().some(function(r){ return r[0] === id; }) : false;
+    if (!existing) sheet.appendRow([id, name, new Date(), '', 'active', email]);
+  } finally { lock.releaseLock(); }
+  return id;
 }
 
 function normalizeTransaction_(body) {
@@ -84,10 +151,11 @@ function validateParty_(type, rawParty) {
 
 function addTransaction_(body, email) {
   const tx = normalizeTransaction_(body);
+  const sessionId = assertSession_(body.sessionId);
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
-    SpreadsheetApp.openById(SHEET_ID).getSheetByName(TX_SHEET).appendRow([Utilities.getUuid(), tx.type, tx.qty, tx.price, tx.total, tx.party, tx.note, new Date(), email]);
+    SpreadsheetApp.openById(SHEET_ID).getSheetByName(TX_SHEET).appendRow([Utilities.getUuid(), tx.type, tx.qty, tx.price, tx.total, tx.party, tx.note, new Date(), email, sessionId]);
   } finally { lock.releaseLock(); }
 }
 
@@ -101,7 +169,8 @@ function updateTransaction_(body, email) {
     const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(TX_SHEET);
     const row = findTransactionRow_(sheet, id);
     const occurredAt = sheet.getRange(row, 8).getValue() || new Date();
-    sheet.getRange(row, 1, 1, 9).setValues([[id, tx.type, tx.qty, tx.price, tx.total, tx.party, tx.note, occurredAt, email]]);
+    const sessionId = assertSession_(body.sessionId || sheet.getRange(row, 10).getDisplayValue() || ('daily-' + transactionDay_(occurredAt)));
+    sheet.getRange(row, 1, 1, 10).setValues([[id, tx.type, tx.qty, tx.price, tx.total, tx.party, tx.note, occurredAt, email, sessionId]]);
   } finally { lock.releaseLock(); }
 }
 
@@ -150,10 +219,13 @@ function json_(payload, callback) {
 function setupHeaders_() {
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const tx = ss.getSheetByName(TX_SHEET);
-  if (tx.getRange('A1:I1').getDisplayValues()[0].join('|') !== 'ID|Type|Quantity|Unit Price|Total|Financial Party|Note|Occurred At|Created By') tx.getRange('A1:I1').setValues([['ID','Type','Quantity','Unit Price','Total','Financial Party','Note','Occurred At','Created By']]);
+  if (tx.getRange(1, 1, 1, TX_HEADERS.length).getDisplayValues()[0].join('|') !== TX_HEADERS.join('|')) tx.getRange(1, 1, 1, TX_HEADERS.length).setValues([TX_HEADERS]);
+  let sessions = ss.getSheetByName(SESSIONS_SHEET);
+  if (!sessions) sessions = ss.insertSheet(SESSIONS_SHEET);
+  if (sessions.getRange(1, 1, 1, SESSION_HEADERS.length).getDisplayValues()[0].join('|') !== SESSION_HEADERS.join('|')) sessions.getRange(1, 1, 1, SESSION_HEADERS.length).setValues([SESSION_HEADERS]);
 }
 function testRead_() { Logger.log(readMembers_()); Logger.log(readTransactions_()); }
-function testAdd_() { addTransaction_({type:'ad',qty:1,price:0,note:'test'}, getUserEmail_()); }
+function testAdd_() { const session = readSessions_()[0]; addTransaction_({type:'ad',qty:1,price:0,party:'حمدي',note:'test',sessionId:session.id}, getUserEmail_()); }
 
 function onOpen() { SpreadsheetApp.getUi().createMenu('Super Subs').addItem('تهيئة العناوين','setupHeaders_').addItem('اختبار القراءة','testRead_').addToUi(); }
 

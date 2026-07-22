@@ -60,6 +60,23 @@ class DashboardFeatureTests(unittest.TestCase):
         self.assertIn("day", HTML)
         self.assertIn("day", API)
 
+    def test_named_sessions_can_be_created_and_selected(self):
+        self.assertIn('id="sessionName"', HTML)
+        self.assertIn('id="createSession"', HTML)
+        self.assertIn('id="sessionSelect"', HTML)
+        self.assertIn("createSession", HTML)
+        self.assertIn("sessionId", HTML)
+        self.assertIn("body.action === 'session'", API)
+        self.assertIn("SESSIONS_SHEET", API)
+        self.assertIn("readSessions_", API)
+
+    def test_new_transactions_are_attached_to_the_active_session(self):
+        self.assertIn("sessionId:currentSessionId", HTML)
+        self.assertIn("sessionId", API)
+        self.assertIn("assertSession_", API)
+        self.assertIn("Session ID", API)
+        self.assertIn("غير مصنفة", API)
+
 
 if __name__ == "__main__":
     unittest.main()
