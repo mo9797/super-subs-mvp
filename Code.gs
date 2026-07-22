@@ -1,6 +1,8 @@
 const SHEET_ID = '1-tema9OUKu0j2wner8aGvy3mUX1qhswhCRNW4jHfgqI';
 const TX_SHEET = 'Transactions';
 const MEMBERS_SHEET = 'Members';
+const VALID_PURCHASE_PARTIES = ['حمدي','علي'];
+const VALID_SALE_PARTIES = ['محفظة حمدي','محفظة علي'];
 
 function doGet(e) {
   const callback = (e && e.parameter && e.parameter.callback) || '';
@@ -20,7 +22,10 @@ function doPost(e) {
     const email = getUserEmail_();
     assertMember_(email);
     if (body.action === 'add') addTransaction_(body, email);
+    else if (body.action === 'update') updateTransaction_(body, email);
+    else if (body.action === 'delete') deleteTransaction_(body.id, email);
     else if (body.action === 'member') addMember_(body.email, email);
+    else if (body.action === 'list') return json_({ok:true, transactions:readTransactions_(), members:readMembers_(), user:email});
     else throw new Error('Unsupported action');
     return json_({ok:true});
   } catch (err) {
@@ -58,17 +63,63 @@ function readTransactions_() {
   });
 }
 
-function addTransaction_(body, email) {
+function normalizeTransaction_(body) {
   const type = String(body.type || '');
   if (['purchase','sale','ad'].indexOf(type) === -1) throw new Error('Invalid transaction type');
   const qty = Number(body.qty);
   const price = Number(body.price);
   if (!isFinite(qty) || qty <= 0 || !isFinite(price) || price < 0) throw new Error('Invalid amount');
-  const total = type === 'ad' ? price : qty * price;
-  const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(TX_SHEET);
-  const party = clean_(body.party, 40);
-  if ((type === 'purchase' || type === 'sale') && !party) throw new Error('Financial party is required');
-  sheet.appendRow([Utilities.getUuid(), type, type === 'ad' ? 1 : qty, price, total, party, clean_(body.note,120), new Date(), email]);
+  const party = validateParty_(type, body.party);
+  return {type:type, qty:type === 'ad' ? 1 : qty, price:price, total:type === 'ad' ? price : qty * price, party:party, note:clean_(body.note,120)};
+}
+
+function validateParty_(type, rawParty) {
+  const party = clean_(rawParty, 40);
+  if (type === 'purchase' && VALID_PURCHASE_PARTIES.indexOf(party) === -1) throw new Error('Invalid purchase party');
+  if (type === 'sale' && VALID_SALE_PARTIES.indexOf(party) === -1) throw new Error('Invalid sale wallet');
+  return type === 'ad' ? '' : party;
+}
+
+function addTransaction_(body, email) {
+  const tx = normalizeTransaction_(body);
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    SpreadsheetApp.openById(SHEET_ID).getSheetByName(TX_SHEET).appendRow([Utilities.getUuid(), tx.type, tx.qty, tx.price, tx.total, tx.party, tx.note, new Date(), email]);
+  } finally { lock.releaseLock(); }
+}
+
+function updateTransaction_(body, email) {
+  const id = clean_(body.id, 80);
+  if (!id) throw new Error('Transaction ID is required');
+  const tx = normalizeTransaction_(body);
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(TX_SHEET);
+    const row = findTransactionRow_(sheet, id);
+    const occurredAt = sheet.getRange(row, 8).getValue() || new Date();
+    sheet.getRange(row, 1, 1, 9).setValues([[id, tx.type, tx.qty, tx.price, tx.total, tx.party, tx.note, occurredAt, email]]);
+  } finally { lock.releaseLock(); }
+}
+
+function deleteTransaction_(rawId, email) {
+  const id = clean_(rawId, 80);
+  if (!id) throw new Error('Transaction ID is required');
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(TX_SHEET);
+    sheet.deleteRow(findTransactionRow_(sheet, id));
+  } finally { lock.releaseLock(); }
+}
+
+function findTransactionRow_(sheet, id) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) throw new Error('Transaction not found');
+  const ids = sheet.getRange(2, 1, lastRow - 1, 1).getDisplayValues();
+  for (let i = 0; i < ids.length; i++) if (ids[i][0] === id) return i + 2;
+  throw new Error('Transaction not found');
 }
 
 function addMember_(rawEmail, requester) {
