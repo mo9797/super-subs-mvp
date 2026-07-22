@@ -33,6 +33,20 @@ class DashboardFeatureTests(unittest.TestCase):
         self.assertIn("VALID_SALE_PARTIES", API)
         self.assertIn("validateParty_", API)
 
+    def test_partner_cash_settlement_is_visible(self):
+        for partner in ("حمدي", "علي"):
+            self.assertIn(f'data-partner="{partner}"', HTML)
+        for field in ("paid", "received", "due", "owes"):
+            self.assertIn(f'data-field="{field}"', HTML)
+        self.assertIn("function partnerSettlement", HTML)
+        self.assertIn("Math.max(paid-received,0)", HTML)
+        self.assertIn("Math.max(received-paid,0)", HTML)
+
+    def test_advertising_expense_requires_a_payer(self):
+        self.assertIn('id="adBy"', HTML)
+        self.assertIn("اختار مين اللي دفع الإعلان", HTML)
+        self.assertIn("type === 'ad' && VALID_PURCHASE_PARTIES", API)
+
 
 if __name__ == "__main__":
     unittest.main()

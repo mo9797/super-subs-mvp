@@ -76,8 +76,9 @@ function normalizeTransaction_(body) {
 function validateParty_(type, rawParty) {
   const party = clean_(rawParty, 40);
   if (type === 'purchase' && VALID_PURCHASE_PARTIES.indexOf(party) === -1) throw new Error('Invalid purchase party');
+  if (type === 'ad' && VALID_PURCHASE_PARTIES.indexOf(party) === -1) throw new Error('Invalid advertising payer');
   if (type === 'sale' && VALID_SALE_PARTIES.indexOf(party) === -1) throw new Error('Invalid sale wallet');
-  return type === 'ad' ? '' : party;
+  return party;
 }
 
 function addTransaction_(body, email) {
