@@ -50,6 +50,16 @@ class DashboardFeatureTests(unittest.TestCase):
         self.assertIn("اختار مين اللي دفع الإعلان", HTML)
         self.assertIn("type === 'ad' && VALID_PURCHASE_PARTIES", API)
 
+    def test_current_session_and_overall_views_exist(self):
+        self.assertIn('data-view="today"', HTML)
+        self.assertIn('data-view="all"', HTML)
+        self.assertIn("الجلسة الحالية", HTML)
+        self.assertIn("الإجمالي العام", HTML)
+        self.assertIn("function transactionDay", HTML)
+        self.assertIn("viewTransactions", HTML)
+        self.assertIn("day", HTML)
+        self.assertIn("day", API)
+
 
 if __name__ == "__main__":
     unittest.main()

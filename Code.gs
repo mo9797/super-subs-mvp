@@ -59,7 +59,8 @@ function readTransactions_() {
   const sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(TX_SHEET);
   const values = sheet.getDataRange().getDisplayValues();
   return values.slice(1).filter(function(r){ return r[0]; }).map(function(r){
-    return {id:r[0], type:r[1], qty:r[2] ? Number(r[2]) : null, price:r[3] ? Number(r[3]) : 0, total:r[4] ? Number(r[4]) : 0, party:r[5] || '', note:r[6] || '', date:r[7] || '', by:r[8] || ''};
+    const occurred = r[7] || '';
+    return {id:r[0], type:r[1], qty:r[2] ? Number(r[2]) : null, price:r[3] ? Number(r[3]) : 0, total:r[4] ? Number(r[4]) : 0, party:r[5] || '', note:r[6] || '', date:occurred, day: transactionDay_(occurred), by:r[8] || ''};
   });
 }
 
@@ -133,6 +134,11 @@ function addMember_(rawEmail, requester) {
   SpreadsheetApp.openById(SHEET_ID).getSheetByName(MEMBERS_SHEET).appendRow([email,'Member','Active']);
 }
 
+function transactionDay_(value) {
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return '';
+  return Utilities.formatDate(d, Session.getScriptTimeZone() || 'Africa/Cairo', 'yyyy-MM-dd');
+}
 function clean_(value, max) { return String(value || '').replace(/[<>]/g,'').slice(0,max); }
 function safeError_(err) { return String(err && err.message || 'Request failed').slice(0,180); }
 function json_(payload, callback) {
