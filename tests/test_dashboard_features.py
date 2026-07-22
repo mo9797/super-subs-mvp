@@ -36,11 +36,14 @@ class DashboardFeatureTests(unittest.TestCase):
     def test_partner_cash_settlement_is_visible(self):
         for partner in ("حمدي", "علي"):
             self.assertIn(f'data-partner="{partner}"', HTML)
-        for field in ("paid", "received", "due", "owes"):
+        for field in ("paid", "received", "share", "due", "owes"):
             self.assertIn(f'data-field="{field}"', HTML)
         self.assertIn("function partnerSettlement", HTML)
-        self.assertIn("Math.max(paid-received,0)", HTML)
-        self.assertIn("Math.max(received-paid,0)", HTML)
+        self.assertIn("profitShare=projectNet/2", HTML)
+        self.assertIn("finalBalance=paid+profitShare-received", HTML)
+        self.assertIn("Math.max(finalBalance,0)", HTML)
+        self.assertIn("Math.max(-finalBalance,0)", HTML)
+        self.assertIn("المكسب أو الخسارة مقسوم بالتساوي 50% لكل واحد", HTML)
 
     def test_advertising_expense_requires_a_payer(self):
         self.assertIn('id="adBy"', HTML)
